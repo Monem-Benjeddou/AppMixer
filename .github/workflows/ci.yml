@@ -1,0 +1,18 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app
+        run: ./build.sh
+      - name: Verify bundle
+        run: |
+          lipo -archs build/AppMixer.app/Contents/MacOS/AppMixer
+          codesign --verify --verbose build/AppMixer.app
