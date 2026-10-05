@@ -1,0 +1,88 @@
+# Builds the universal Mac app on every push and pull request.
+# Pushing a tag like v1.1 also publishes a GitHub Release with the build attached.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # v1.1 -> 1.1 for tagged builds; otherwise 0.0-dev
+  VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v0.0-dev' }}
+
+jobs:
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load signing certificate
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERT_P12" ]; then
+            echo "::warning::No MAC_CERT_P12 secret: the app is signed ad hoc."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | awk -F'"' 'NF>1 {print $2; exit}')"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build universal app
+        run: |
+          ./build.sh "${VERSION#v}"
+          lipo -archs build/AppMixer.app/Contents/MacOS/AppMixer | grep -q x86_64
+          lipo -archs build/AppMixer.app/Contents/MacOS/AppMixer | grep -q arm64
+          codesign --verify --deep --strict build/AppMixer.app
+          codesign -dvv build/AppMixer.app 2>&1 | grep -E "Format|Authority|Identifier" || true
+          ditto -c -k --keepParent build/AppMixer.app AppMixer-mac.zip
+          shasum -a 256 AppMixer-mac.zip | tee AppMixer-mac.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            AppMixer-mac.zip
+            AppMixer-mac.zip.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<NOTES
+          **Mac** (macOS 14.2 or later, Apple Silicon or Intel): download \`AppMixer-mac.zip\`, unzip it, and move AppMixer.app to Applications. The first time, open it with right-click → Open, because the app isn't notarized by Apple.
+
+          The first time you change an app's volume, macOS asks to let AppMixer record system audio. Allow it so AppMixer can control that app.
+
+          The [README](https://github.com/${{ github.repository }}#readme) has the full guide. SHA-256 checksum: \`AppMixer-mac.zip.sha256\`.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$TAG" AppMixer-mac.zip AppMixer-mac.zip.sha256 \
+            --repo "${{ github.repository }}" --title "AppMixer ${TAG#v}" --notes-file notes.md --generate-notes

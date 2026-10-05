@@ -1,11 +1,17 @@
 # AppMixer
 
-[![CI](https://github.com/Monem-Benjeddou/AppMixer/actions/workflows/ci.yml/badge.svg)](https://github.com/Monem-Benjeddou/AppMixer/actions/workflows/ci.yml)
+[![Build](https://github.com/Monem-Benjeddou/AppMixer/actions/workflows/build.yml/badge.svg)](https://github.com/Monem-Benjeddou/AppMixer/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/Monem-Benjeddou/AppMixer)](https://github.com/Monem-Benjeddou/AppMixer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![macOS 14.2+](https://img.shields.io/badge/macOS-14.2%2B-lightgrey)
 
 Per-app volume control for macOS. Turn individual apps up or down, mute them, or send them to different speakers. For example, Spotify quieter, Discord louder, and the game through your headphones.
+
+![AppMixer's mixer window, with Chrome and QuickTime playing and each app's volume, mute, and output controls](docs/screenshots/mixer.jpg)
+
+| Devices | |
+|---|---|
+| ![Output devices with their volume and the system default](docs/screenshots/devices.jpg) | Every output device with its volume. Make any of them the system default in one click. Apps you've sent to a device are listed with it. |
 
 ## Features
 
@@ -19,7 +25,7 @@ Per-app volume control for macOS. Turn individual apps up or down, mute them, or
 
 ## Install
 
-1. Download `AppMixer-vX.Y.Z.zip` from the [latest release](https://github.com/Monem-Benjeddou/AppMixer/releases/latest) and unzip it.
+1. Download `AppMixer-mac.zip` from the [latest release](https://github.com/Monem-Benjeddou/AppMixer/releases/latest) and unzip it.
 2. Move `AppMixer.app` to `/Applications`.
 3. The app isn't notarized, so open it the first time by right-clicking it and choosing **Open**. Alternatively, run:
    ```sh
@@ -65,7 +71,7 @@ cd AppMixer
 ./build.sh 1.2.0      # same, with the version number set
 ```
 
-The build is signed ad-hoc. Each local rebuild changes the code signature, so macOS asks for the audio permission again once after each rebuild. Downloaded releases don't have this problem.
+`build.sh` signs with `$SIGN_IDENTITY` if set. Otherwise it uses a local certificate named "… Local Signing" from your keychain, or falls back to ad-hoc signing. A stable certificate keeps macOS permissions after a rebuild, because an ad-hoc signature changes with every build.
 
 ### Project layout
 
@@ -80,11 +86,18 @@ The build is signed ad-hoc. Each local rebuild changes the code signature, so ma
 
 ## Releasing
 
-Push a tag. The [release workflow](.github/workflows/release.yml) builds the universal app, zips it, and publishes a GitHub release with a SHA-256 checksum.
+[`build.yml`](.github/workflows/build.yml) builds and verifies the universal app on every push and pull request. When you push a version tag, it also publishes a GitHub Release with `AppMixer-mac.zip` and its SHA-256 checksum:
 
 ```sh
-git tag v1.1.0 && git push origin v1.1.0
+git tag v1.1 && git push origin v1.1
 ```
+
+To sign releases with your own certificate (for example, a Developer ID), add these repository secrets:
+
+- `MAC_CERT_P12`: the base64-encoded `.p12`
+- `MAC_CERT_PASSWORD`: its password
+
+Without them, the build is signed ad hoc and the workflow shows a warning.
 
 ## License
 
