@@ -173,10 +173,25 @@ private struct SectionHeader: View {
 
 private struct PermissionBanner: View {
     var body: some View {
-        Callout(symbol: "lock.fill", tint: .orange,
-                title: "AppMixer needs permission to control app audio",
-                message: "Turn on AppMixer under System Settings › Privacy & Security › Screen & System Audio Recording (System Audio Recording Only). Your settings are saved and apply as soon as access is granted.",
-                action: ("Open Privacy Settings", openPrivacySettings))
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "lock.fill").font(.title2).foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("AppMixer needs permission to control app audio").font(.headline)
+                Text("Turn on AppMixer under System Settings › Privacy & Security › Screen & System Audio Recording (System Audio Recording Only). Already on there? That permission is from an older version, which macOS no longer accepts. Click Reset Permission, then Allow.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Open Privacy Settings", action: openPrivacySettings)
+                    Button("Reset Permission") { MixerModel.shared.resetPermission() }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.12)))
+        .padding(.vertical, 6)
     }
 }
 

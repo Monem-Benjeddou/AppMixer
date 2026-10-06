@@ -27,6 +27,23 @@ enum AudioCapturePermission {
         }
     }
 
+    /// Forgets AppMixer's recorded decision, so the next request asks again. Needed when an entry
+    /// from an older, differently signed version is still on file: System Settings shows AppMixer
+    /// switched on, but macOS refuses it because the signature no longer matches.
+    static func reset() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        task.arguments = ["reset", "AudioCapture", bundleID]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            return task.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
     /// Shows the system prompt (only if the user hasn't decided yet) and reports the answer on the main queue.
     static func request(_ completion: @escaping (Bool) -> Void) {
         guard let requestFn else {

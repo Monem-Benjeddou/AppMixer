@@ -14,6 +14,11 @@ final class AppTap {
 
     /// [0] = target gain (written by the UI), [1] = gain at the end of the last render (written by the IO thread).
     private let gainState = UnsafeMutablePointer<Float>.allocate(capacity: 2)
+    /// Render callbacks so far, counted on the IO thread. If it stops moving, the route is dead
+    /// (e.g. the output device went away mid-stream) and the tap is rebuilt.
+    private let renderCounter = UnsafeMutablePointer<UInt64>.allocate(capacity: 1)
+    var renderCount: UInt64 { renderCounter.pointee }
+    let createdAt = Date()
 
     var gain: Float {
         get { gainState[0] }
@@ -26,6 +31,7 @@ final class AppTap {
         let gain = gain.isFinite ? max(0, gain) : 1
         gainState[0] = gain
         gainState[1] = gain
+        renderCounter.pointee = 0
         do {
             try start(outputDevice: outputDevice)
         } catch {
@@ -37,6 +43,7 @@ final class AppTap {
     deinit {
         stop()
         gainState.deallocate()
+        renderCounter.deallocate()
     }
 
     private func start(outputDevice: OutputDevice) throws {
@@ -75,7 +82,9 @@ final class AppTap {
         // The aggregate's input buffers list the output device's own input streams (e.g. a headset mic) first, then the tap.
         let tapBufferIndex = CA.streamCount(outputDevice.objectID, scope: kAudioObjectPropertyScopeInput)
         let state = gainState
+        let counter = renderCounter
         try check(AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) { _, input, _, output, _ in
+            counter.pointee &+= 1
             AppTap.render(input: input, output: output, tapBufferIndex: tapBufferIndex, gain: state)
         }, "Creating IO proc")
         try check(AudioDeviceStart(aggregateID, ioProcID), "Starting audio device")

@@ -6,6 +6,10 @@ struct OutputDevice: Identifiable, Hashable {
     let uid: String
     let name: String
     let transport: UInt32
+    /// Format details that change when, say, Bluetooth earbuds switch to call mode (16 kHz mono)
+    /// for a voice call. Routing is rebuilt when they change.
+    var sampleRate: Double = 0
+    var outputChannels: Int = 0
     var id: String { uid }
 
     var symbol: String {
@@ -58,7 +62,9 @@ enum AudioDiscovery {
                   let uid = CA.string(id, kAudioDevicePropertyDeviceUID),
                   let name = CA.string(id, kAudioObjectPropertyName) else { return nil }
             let transport = CA.value(id, kAudioDevicePropertyTransportType, initial: UInt32(0)) ?? 0
-            return OutputDevice(objectID: id, uid: uid, name: name, transport: transport)
+            return OutputDevice(objectID: id, uid: uid, name: name, transport: transport,
+                                sampleRate: CA.value(id, kAudioDevicePropertyNominalSampleRate, initial: Float64(0)) ?? 0,
+                                outputChannels: CA.channelCount(id, scope: kAudioObjectPropertyScopeOutput))
         }
     }
 
