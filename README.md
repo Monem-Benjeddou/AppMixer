@@ -62,6 +62,8 @@ Both the tap and the aggregate device are private to AppMixer's process. **If Ap
   - A third quick crash stops the automatic reopening, so a crash loop can't run forever.
 - **Only one copy runs.** Opening a second copy (say, one in Downloads) brings the running one forward instead of starting another.
 - **The UI never waits on the audio system.** Audio-system calls can stall for seconds, for example while a Bluetooth device wakes up. All of them run on a dedicated background queue, never the main thread.
+- **Bluetooth and other outputs that change.** When earbuds switch to call mode for a voice call (lower sample rate, mono), reconnect, or disappear, AppMixer rebuilds the affected routes right away. A watchdog also rebuilds any route whose audio stops flowing.
+- **Stale permission recovery.** If macOS still has a permission from an older AppMixer on file (System Settings shows it on, but macOS refuses it), the permission banner's **Reset Permission** button clears it and asks again.
 - **Permission is asked for once.** AppMixer checks the permission status before creating any tap and asks at most once per launch. If you denied it, the app shows a banner with a shortcut to the right System Settings page instead of prompting again.
 - **No retry loops.** When an app's capture can't be set up, AppMixer remembers it and doesn't retry until something changes: the app, the device, a setting, or you click **Try Again**. Meanwhile the app keeps playing normally.
 - **Recovery.**

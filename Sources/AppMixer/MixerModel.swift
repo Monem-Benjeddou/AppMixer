@@ -63,6 +63,10 @@ final class MixerModel: ObservableObject {
                 DispatchQueue.main.async { MixerModel.shared.refresh() }
             }
         }
+        // A device switching format (Bluetooth earbuds entering call mode) or going away: reroute.
+        engine.onDeviceChange = {
+            DispatchQueue.main.async { MixerModel.shared.refresh() }
+        }
         // If coreaudiod restarts, every tap and object ID we hold is dead: drop them and rebuild from scratch.
         CA.observeSystem(kAudioHardwarePropertyServiceRestarted, queue: engine.queue) { [engine] in
             log.notice("Audio server restarted; rebuilding taps")
@@ -172,6 +176,10 @@ final class MixerModel: ObservableObject {
             log.error("Audio server has not responded for 4s")
             audioServerUnresponsive = true
         }
+        // Routes whose audio stopped flowing are rebuilt, whether or not anything is on screen.
+        engine.queue.async { [engine] in
+            if engine.removeStalledTaps() { DispatchQueue.main.async { MixerModel.shared.refresh() } }
+        }
         // "Is playing" and device volumes are only ever shown, so with no window or menu open there's
         // nothing to poll for: apps and devices coming and going arrive as system notifications.
         // A slow rescan stays as a safety net.
@@ -229,6 +237,20 @@ final class MixerModel: ObservableObject {
     // MARK: Permission
 
     /// True when taps may be created. Asks macOS at most once; never creates a tap while the answer is pending or "no".
+    /// Clears a stale permission entry and asks again (one system prompt).
+    func resetPermission() {
+        guard AudioCapturePermission.reset() else {
+            log.error("Couldn't reset the audio capture permission")
+            openPrivacySettings()
+            return
+        }
+        log.notice("Audio capture permission reset; asking again")
+        grantedThisSession = false
+        permission = .unknown
+        engine.queue.async { [engine] in engine.clearFailures() }
+        _ = ensurePermission()
+    }
+
     private func ensurePermission() -> Bool {
         let status = AudioCapturePermission.status
         let effective: AudioCapturePermission.Status = status == .unknown && grantedThisSession ? .granted : status

@@ -92,6 +92,25 @@ enum CA {
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, queue) { _, _ in handler() }
     }
 
+    /// Calls `handler` on `queue` when a property of one object changes.
+    static func observe(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal,
+                        queue: DispatchQueue, _ handler: @escaping () -> Void) {
+        var addr = address(selector, scope: scope)
+        AudioObjectAddPropertyListenerBlock(object, &addr, queue) { _, _ in handler() }
+    }
+
+    /// Total channels across a device's streams in one direction.
+    static func channelCount(_ device: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {
+        var addr = address(kAudioDevicePropertyStreamConfiguration, scope: scope)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &addr, 0, nil, &size) == noErr, size > 0 else { return 0 }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, raw) == noErr else { return 0 }
+        let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+        return list.reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
     static var defaultOutputDevice: AudioObjectID? {
         value(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice,
               initial: AudioObjectID(kAudioObjectUnknown))
