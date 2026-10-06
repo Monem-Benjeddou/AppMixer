@@ -77,7 +77,13 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cat > notes.md <<NOTES
-          **Mac** (macOS 14.2 or later, Apple Silicon or Intel): download \`AppMixer-mac.zip\`, unzip it, and move AppMixer.app to Applications. The first time, open it with right-click → Open, because the app isn't notarized by Apple.
+          **Mac** (macOS 14.2 or later, Apple Silicon or Intel). The quickest way to install or update is to paste this into Terminal:
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/Monem-Benjeddou/AppMixer/main/install.sh | bash
+          \`\`\`
+
+          Or download \`AppMixer-mac.zip\`, unzip it, and move AppMixer.app to Applications. The app isn't notarized by Apple, so on macOS 15 or later click **Open Anyway** in System Settings › Privacy & Security after the first launch (on macOS 14, right-click → Open).
 
           The first time you change an app's volume, macOS asks to let AppMixer record system audio. Allow it so AppMixer can control that app.
 
