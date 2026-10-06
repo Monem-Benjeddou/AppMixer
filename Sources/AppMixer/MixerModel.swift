@@ -26,6 +26,11 @@ final class MixerModel: ObservableObject {
     @Published private(set) var permission = AudioCapturePermission.status
     /// True while a scan has been stuck in the audio server for a while (shown as a banner; the UI stays usable).
     @Published private(set) var audioServerUnresponsive = false
+    /// Safe mode after repeated crashes: saved volumes aren't applied (no taps are created) until
+    /// they're turned back on. Audio a crashing tap could take down then just plays normally.
+    @Published private(set) var volumesPaused = Stability.safeMode
+    /// "AppMixer quit unexpectedly and was reopened", until dismissed.
+    @Published var crashNotice = Stability.safeMode ? nil : Stability.previousCrash?.message
 
     private let engine = AudioEngine()
     private var timer: Timer?
@@ -131,11 +136,19 @@ final class MixerModel: ObservableObject {
         refresh()
     }
 
+    func resumeVolumes() {
+        Stability.leaveSafeMode()
+        volumesPaused = false
+        refresh()
+    }
+
     private func update(_ appID: String, _ change: (inout AppSetting) -> Void) {
         var setting = self.setting(for: appID)
         change(&setting)
         settings[appID] = setting.isPassthrough ? nil : setting
         save()
+        // Changing a volume in safe mode means you want them back.
+        if volumesPaused { return resumeVolumes() }
 
         guard let app = apps.first(where: { $0.id == appID }) else { return }
         let canCreate = setting.isPassthrough || ensurePermission()
@@ -170,7 +183,7 @@ final class MixerModel: ObservableObject {
         }
         refreshInFlight = true
         refreshStarted = Date()
-        let settings = self.settings
+        let settings = volumesPaused ? [:] : self.settings
         let canCreate = settings.values.contains { !$0.isPassthrough } ? ensurePermission() : false
 
         engine.queue.async { [engine] in

@@ -55,6 +55,12 @@ Both the tap and the aggregate device are private to AppMixer's process. **If Ap
 
 ## Reliability
 
+- **Crashes are caught, and AppMixer comes back.**
+  - If AppMixer crashes (a runtime error, a memory error or an uncaught exception), it records what happened and reopens itself, then tells you it was reopened.
+  - If it stops responding for 45 seconds, it's restarted the same way. A short freeze is only logged.
+  - **Safe mode.** If it crashes twice in a row within two minutes of starting, it starts in safe mode: your saved volumes are paused, so every app plays normally, until you click **Turn Volumes Back On** (or change a volume).
+  - A third quick crash stops the automatic reopening, so a crash loop can't run forever.
+- **Only one copy runs.** Opening a second copy (say, one in Downloads) brings the running one forward instead of starting another.
 - **The UI never waits on the audio system.** Audio-system calls can stall for seconds, for example while a Bluetooth device wakes up. All of them run on a dedicated background queue, never the main thread.
 - **Permission is asked for once.** AppMixer checks the permission status before creating any tap and asks at most once per launch. If you denied it, the app shows a banner with a shortcut to the right System Settings page instead of prompting again.
 - **No retry loops.** When an app's capture can't be set up, AppMixer remembers it and doesn't retry until something changes: the app, the device, a setting, or you click **Try Again**. Meanwhile the app keeps playing normally.

@@ -87,6 +87,19 @@ struct MixerPage: View {
                 ContentUnavailableView.search(text: query)
             } else {
                 List {
+                    if model.volumesPaused {
+                        Callout(symbol: "lifepreserver", tint: .orange,
+                                title: "Your saved volumes are paused",
+                                message: "AppMixer quit unexpectedly twice right after starting, so it started without changing any app's audio. Everything plays at normal volume until you turn them back on.",
+                                action: ("Turn Volumes Back On", { model.resumeVolumes() }))
+                            .listRowSeparator(.hidden)
+                    } else if let notice = model.crashNotice {
+                        Callout(symbol: "arrow.clockwise.circle.fill", tint: .blue,
+                                title: notice,
+                                message: "Your volumes and outputs were restored. If it keeps happening, please open an issue on GitHub.",
+                                action: ("Dismiss", { model.crashNotice = nil }))
+                            .listRowSeparator(.hidden)
+                    }
                     if model.audioServerUnresponsive {
                         Callout(symbol: "hourglass", tint: .yellow,
                                 title: "The macOS audio system isn't responding",
@@ -329,7 +342,7 @@ private struct DeviceRow: View {
                 Slider(value: Binding(get: { Double(volume) },
                                       set: { model.setDeviceVolume(Float($0), for: device) }), in: 0...1)
                     .frame(width: 160)
-                Text("\(Int((volume * 100).rounded()))%")
+                Text("\(safeInt((volume * 100).rounded()))%")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(width: 40, alignment: .trailing)
@@ -522,7 +535,7 @@ private struct VolumeLabel: View {
     let setting: AppSetting
 
     var body: some View {
-        Text(setting.muted ? "Muted" : "\(Int((setting.volume * 100).rounded()))%")
+        Text(setting.muted ? "Muted" : "\(safeInt((setting.volume * 100).rounded()))%")
             .font(.callout.monospacedDigit())
             .foregroundStyle(setting.muted ? AnyShapeStyle(.red)
                              : setting.volume > 1 ? AnyShapeStyle(.orange)
