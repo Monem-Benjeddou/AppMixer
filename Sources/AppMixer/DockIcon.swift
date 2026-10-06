@@ -14,6 +14,7 @@ final class DockIcon {
     /// While menu-bar-only, a cheap once-a-second check catches windows that appear without posting
     /// any notification (e.g. opened while macOS hasn't let the app become active).
     private var fallbackTimer: Timer?
+    private var appliedPolicy: NSApplication.ActivationPolicy?
 
     func start() {
         let center = NotificationCenter.default
@@ -42,7 +43,10 @@ final class DockIcon {
         let hasWindow = NSApp.windows.contains { $0 !== closing && $0.isVisible && Self.isAppWindow($0) }
         let wanted: NSApplication.ActivationPolicy = hasWindow && isEnabled() ? .regular : .accessory
         setFallbackTimer(running: wanted == .accessory && isEnabled())
-        guard NSApp.activationPolicy() != wanted else { return }
+        // Compared with what we last set: asking NSApp for its policy is a round trip to a system
+        // service, too costly for a once-a-second check.
+        guard wanted != appliedPolicy else { return }
+        appliedPolicy = wanted
         NSApp.setActivationPolicy(wanted)
         // Coming back to the Dock leaves the app inactive; bring the window forward.
         if wanted == .regular { NSApp.activate() }
