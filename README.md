@@ -25,12 +25,22 @@ Per-app volume control for macOS. Turn individual apps up or down, mute them, or
 
 ## Install
 
+**Quickest:** paste this into Terminal. It downloads the latest release, checks its checksum and signature, and installs it into Applications without the "unidentified developer" warning ([read the script first](install.sh)):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Monem-Benjeddou/AppMixer/main/install.sh | bash
+```
+
+Run the same command again later to update.
+
+**Or install it yourself:**
+
 1. Download `AppMixer-mac.zip` from the [latest release](https://github.com/Monem-Benjeddou/AppMixer/releases/latest) and unzip it.
 2. Move `AppMixer.app` to `/Applications`.
-3. The app isn't notarized, so open it the first time by right-clicking it and choosing **Open**. Alternatively, run:
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/AppMixer.app
-   ```
+3. Open it. AppMixer isn't notarized by Apple (that requires a paid developer account), so macOS blocks the first launch:
+   - **macOS 15 or later:** close the warning, open **System Settings › Privacy & Security**, scroll down, and click **Open Anyway** next to AppMixer.
+   - **macOS 14:** right-click AppMixer.app, choose **Open**, then click **Open** again.
+   - **Or**, in Terminal: `xattr -dr com.apple.quarantine /Applications/AppMixer.app`
 4. The first time you change an app's volume, macOS asks to let AppMixer record system audio. Allow it. You can change this later in **System Settings › Privacy & Security › Screen & System Audio Recording**.
 
 ## How it works
