@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Stability.didFinishLaunching()
         DockIcon.shared.isEnabled = { UserDefaults.standard.object(forKey: Prefs.showInDock) as? Bool ?? true }
         DockIcon.shared.start()
     }
@@ -19,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AppMixerApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     // Created eagerly so saved per-app settings apply at launch, not when a window first opens.
-    @ObservedObject private var model = MixerModel.shared
+    @ObservedObject private var model: MixerModel
+
+    init() {
+        Stability.start() // before anything else, so crashes and hangs from here on are caught
+        _model = ObservedObject(wrappedValue: MixerModel.shared)
+    }
 
     var body: some Scene {
         Window("AppMixer", id: "mixer") {

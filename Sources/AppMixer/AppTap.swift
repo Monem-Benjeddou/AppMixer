@@ -17,12 +17,13 @@ final class AppTap {
 
     var gain: Float {
         get { gainState[0] }
-        set { gainState[0] = max(0, newValue) }
+        set { gainState[0] = newValue.isFinite ? max(0, newValue) : 1 } // never NaN into the audio thread
     }
 
     init(processObjectIDs: [AudioObjectID], outputDevice: OutputDevice, gain: Float) throws {
         self.processObjectIDs = processObjectIDs
         self.outputUID = outputDevice.uid
+        let gain = gain.isFinite ? max(0, gain) : 1
         gainState[0] = gain
         gainState[1] = gain
         do {
