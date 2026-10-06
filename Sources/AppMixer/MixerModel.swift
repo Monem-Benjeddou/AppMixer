@@ -37,7 +37,9 @@ final class MixerModel: ObservableObject {
     private var refreshInFlight = false
     private var refreshPending = false
     private var refreshStarted = Date()
-    private var isRequestingPermission = false
+    /// True while the macOS permission prompt is waiting for an answer (shown as a hint: the prompt
+    /// often appears in a screen corner where it's easy to miss).
+    @Published private(set) var isRequestingPermission = false
     /// Set when the system prompt said yes, in case the status check can't see it.
     private var grantedThisSession = false
     private static let settingsKey = "appSettings"

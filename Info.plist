@@ -2,17 +2,27 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>AppMixer</string>
-    <key>CFBundleDisplayName</key><string>AppMixer</string>
-    <key>CFBundleIdentifier</key><string>dev.appmixer.AppMixer</string>
-    <key>CFBundleExecutable</key><string>AppMixer</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.4</string>
-    <key>CFBundleVersion</key><string>4</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>LSMinimumSystemVersion</key><string>14.2</string>
-    <key>NSAudioCaptureUsageDescription</key>
-    <string>AppMixer needs to capture each app's audio so it can change its volume or send it to another output device.</string>
+	<key>CFBundleDisplayName</key>
+	<string>AppMixer</string>
+	<key>CFBundleExecutable</key>
+	<string>AppMixer</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.appmixer.AppMixer</string>
+	<key>CFBundleName</key>
+	<string>AppMixer</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.5</string>
+	<key>CFBundleVersion</key>
+	<string>5</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.2</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>AppMixer needs to capture each app's audio so it can change its volume or send it to another output device.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>
