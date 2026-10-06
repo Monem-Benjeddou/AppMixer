@@ -172,7 +172,19 @@ final class MixerModel: ObservableObject {
             log.error("Audio server has not responded for 4s")
             audioServerUnresponsive = true
         }
+        // "Is playing" and device volumes are only ever shown, so with no window or menu open there's
+        // nothing to poll for: apps and devices coming and going arrive as system notifications.
+        // A slow rescan stays as a safety net.
+        if !Self.isUIVisible, Date().timeIntervalSince(refreshStarted) < 30 { return }
         refresh()
+    }
+
+    /// Whether any AppMixer window or the menu bar panel is on screen.
+    private static var isUIVisible: Bool {
+        NSApp.windows.contains { window in
+            window.isVisible && window.occlusionState.contains(.visible)
+                && !String(describing: type(of: window)).contains("StatusBar")
+        }
     }
 
     /// Rescans in the background. Coalesced: at most one scan runs, plus one queued behind it.
