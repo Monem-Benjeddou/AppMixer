@@ -7,8 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let showInDock = UserDefaults.standard.object(forKey: Prefs.showInDock) as? Bool ?? true
-        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+        DockIcon.shared.isEnabled = { UserDefaults.standard.object(forKey: Prefs.showInDock) as? Bool ?? true }
+        DockIcon.shared.start()
     }
 
     // Keep running in the menu bar after the window is closed.
