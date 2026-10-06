@@ -19,7 +19,7 @@ Per-app volume control for macOS. Turn individual apps up or down, mute them, or
 - **Per-app mute.** Silence one app without touching the others.
 - **Per-app output routing.** Send any app to any output device. If that device disconnects, the app falls back to the system output, then switches back when the device returns.
 - **Devices page.** See every output device, change its volume, and make it the default.
-- **Menu bar panel.** Quick controls for whatever is playing, plus a full window with search.
+- **Menu bar panel.** Quick controls for whatever is playing, plus a full window with search. Close the window and AppMixer leaves the Dock but keeps working from the menu bar.
 - **Remembers settings per app.** Choices are reapplied automatically every time the app plays.
 - **No driver to install.** AppMixer uses Core Audio process taps (macOS 14.2+), not a kernel extension or virtual audio device.
 
