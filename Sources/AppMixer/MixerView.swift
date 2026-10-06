@@ -107,7 +107,13 @@ struct MixerPage: View {
                                 action: nil)
                             .listRowSeparator(.hidden)
                     }
-                    if model.permission == .denied {
+                    if model.isRequestingPermission {
+                        Callout(symbol: "hand.raised.fill", tint: .blue,
+                                title: "Click Allow in the macOS prompt",
+                                message: "macOS is asking whether AppMixer may control app audio. Volume changes take effect once you allow it. The prompt may be in a corner of your screen.",
+                                action: nil)
+                            .listRowSeparator(.hidden)
+                    } else if model.permission == .denied {
                         PermissionBanner().listRowSeparator(.hidden)
                     } else if !model.errors.isEmpty {
                         ErrorBanner(errors: model.errors, apps: model.apps) { model.retryFailed() }
@@ -409,6 +415,14 @@ struct MenuBarMixer: View {
 
             Divider()
 
+            if model.isRequestingPermission || model.permission == .denied {
+                PermissionNotice(waiting: model.isRequestingPermission) {
+                    openWindow(id: "mixer")
+                    NSApp.activate()
+                }
+                Divider()
+            }
+
             if apps.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "speaker.wave.2").font(.title2).foregroundStyle(.tertiary)
@@ -444,6 +458,33 @@ struct MenuBarMixer: View {
             .padding(12)
         }
         .frame(width: 340)
+    }
+}
+
+/// The menu bar's short version of the permission banners: volume changes do nothing until macOS allows them.
+private struct PermissionNotice: View {
+    let waiting: Bool
+    let openMixer: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: waiting ? "hand.raised.fill" : "lock.fill")
+                .foregroundStyle(waiting ? Color.blue : Color.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(waiting ? "Click Allow in the macOS prompt" : "Volume control is off").font(.callout.weight(.semibold))
+                Text(waiting ? "Volume changes start working once you allow AppMixer. The prompt may be in a corner of your screen."
+                             : "AppMixer doesn't have permission to control app audio.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !waiting {
+                    Button("Fix…", action: openMixer).controlSize(.small)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background((waiting ? Color.blue : Color.orange).opacity(0.1))
     }
 }
 
