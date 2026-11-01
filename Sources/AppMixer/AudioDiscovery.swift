@@ -1,7 +1,7 @@
 import AppKit
 import CoreAudio
 
-struct OutputDevice: Identifiable, Hashable {
+struct AudioDevice: Identifiable, Hashable {
     let objectID: AudioObjectID
     let uid: String
     let name: String
@@ -10,11 +10,14 @@ struct OutputDevice: Identifiable, Hashable {
     /// for a voice call. Routing is rebuilt when they change.
     var sampleRate: Double = 0
     var outputChannels: Int = 0
+    var sampleRates: [Double] = []
     var id: String { uid }
 
     var symbol: String {
         switch transport {
-        case kAudioDeviceTransportTypeBuiltIn: return name.localizedCaseInsensitiveContains("headphone") ? "headphones" : "laptopcomputer"
+        case kAudioDeviceTransportTypeBuiltIn:
+            if name.localizedCaseInsensitiveContains("headphone") { return "headphones" }
+            return name.localizedCaseInsensitiveContains("microphone") ? "mic" : "laptopcomputer"
         case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
             return name.localizedCaseInsensitiveContains("airpods") ? "airpods" : "headphones"
         case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort, kAudioDeviceTransportTypeThunderbolt: return "display"
@@ -56,15 +59,25 @@ struct AudioApp: Identifiable, Equatable, @unchecked Sendable { // NSImage is im
 }
 
 enum AudioDiscovery {
-    static func outputDevices() -> [OutputDevice] {
+    /// Devices with streams in one direction: `kAudioObjectPropertyScopeOutput` or `…Input`.
+    static func devices(_ scope: AudioObjectPropertyScope) -> [AudioDevice] {
         CA.objectIDs(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDevices).compactMap { id in
-            guard CA.streamCount(id, scope: kAudioObjectPropertyScopeOutput) > 0,
+            guard CA.streamCount(id, scope: scope) > 0,
                   let uid = CA.string(id, kAudioDevicePropertyDeviceUID),
+                  !uid.hasPrefix("AppMixer-"), // AppMixer's own route aggregates: private, but visible to this process
                   let name = CA.string(id, kAudioObjectPropertyName) else { return nil }
             let transport = CA.value(id, kAudioDevicePropertyTransportType, initial: UInt32(0)) ?? 0
-            return OutputDevice(objectID: id, uid: uid, name: name, transport: transport,
+            return AudioDevice(objectID: id, uid: uid, name: name, transport: transport,
                                 sampleRate: CA.value(id, kAudioDevicePropertyNominalSampleRate, initial: Float64(0)) ?? 0,
-                                outputChannels: CA.channelCount(id, scope: kAudioObjectPropertyScopeOutput))
+                                outputChannels: CA.channelCount(id, scope: kAudioObjectPropertyScopeOutput),
+                                sampleRates: CA.sampleRates(id))
+        }
+    }
+
+    /// The process that plays alerts and other interface sounds (`systemsoundserverd`).
+    static func soundEffectProcesses() -> [AudioObjectID] {
+        CA.objectIDs(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList).filter {
+            CA.string($0, kAudioProcessPropertyBundleID) == "systemsoundserverd"
         }
     }
 
