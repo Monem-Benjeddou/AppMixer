@@ -49,6 +49,7 @@ jobs:
           ./build.sh "${VERSION#v}"
           lipo -archs build/AppMixer.app/Contents/MacOS/AppMixer | grep -q x86_64
           lipo -archs build/AppMixer.app/Contents/MacOS/AppMixer | grep -q arm64
+          build/AppMixer.app/Contents/MacOS/AppMixer --dsp-self-test
           codesign --verify --deep --strict build/AppMixer.app
           codesign -dvv build/AppMixer.app 2>&1 | grep -E "Format|Authority|Identifier" || true
           ditto -c -k --keepParent build/AppMixer.app AppMixer-mac.zip

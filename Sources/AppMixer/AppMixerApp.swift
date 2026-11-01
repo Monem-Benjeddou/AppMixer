@@ -10,6 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Stability.didFinishLaunching()
         DockIcon.shared.isEnabled = { UserDefaults.standard.object(forKey: Prefs.showInDock) as? Bool ?? true }
         DockIcon.shared.start()
+        Shortcut.shared.register()
+        VolumeKeys.shared.update()
+        // Accessibility may have just been granted in System Settings.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { VolumeKeys.shared.update() }
+        }
     }
 
     // Keep running in the menu bar after the window is closed.
@@ -23,6 +29,7 @@ struct AppMixerApp: App {
     @ObservedObject private var model: MixerModel
 
     init() {
+        if CommandLine.arguments.contains("--dsp-self-test") { exit(EffectChain.selfTest() ? 0 : 1) }
         Stability.start() // before anything else, so crashes and hangs from here on are caught
         _model = ObservedObject(wrappedValue: MixerModel.shared)
     }
@@ -32,7 +39,7 @@ struct AppMixerApp: App {
             RootView(model: model)
         }
         .defaultSize(width: 940, height: 600)
-        .windowToolbarStyle(.unified)
+        .windowToolbarStyle(.unified(showsTitle: false))
 
         Settings {
             SettingsView()
@@ -41,8 +48,24 @@ struct AppMixerApp: App {
         MenuBarExtra {
             MenuBarMixer(model: model)
         } label: {
-            Image(systemName: "slider.vertical.3")
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+enum MenuBarIcon: String { case mixer, volume }
+
+/// The menu bar icon: the mixer symbol, or the output volume at a glance.
+private struct MenuBarLabel: View {
+    @ObservedObject var model: MixerModel
+    @AppStorage(Prefs.menuBarIcon) private var style = MenuBarIcon.mixer.rawValue
+
+    var body: some View {
+        if style == MenuBarIcon.volume.rawValue, let device = model.defaultDevice {
+            Image(systemName: VolumeSymbol.name(volume: model.outputVolume(device), muted: model.isOutputMuted(device)))
+        } else {
+            Image(systemName: "slider.vertical.3")
+        }
     }
 }

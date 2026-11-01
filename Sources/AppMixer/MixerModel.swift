@@ -7,8 +7,20 @@ struct AppSetting: Codable, Equatable {
     var muted = false
     /// nil = follow the system default output.
     var deviceUID: String?
+    var effects = Effects()
 
-    var isPassthrough: Bool { volume == 1 && !muted && deviceUID == nil }
+    var isPassthrough: Bool { volume == 1 && !muted && deviceUID == nil && !effects.isActive }
+
+    init() {}
+
+    // Settings saved before a field existed still decode; synthesized decoding would reject them and lose every app's setting.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        volume = try c.decodeIfPresent(Float.self, forKey: .volume) ?? 1
+        muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+        deviceUID = try c.decodeIfPresent(String.self, forKey: .deviceUID)
+        effects = try c.decodeIfPresent(Effects.self, forKey: .effects) ?? Effects()
+    }
 }
 
 /// UI state and per-app settings. Holds no Core Audio calls itself: all of that is done by `AudioEngine`
@@ -18,9 +30,21 @@ final class MixerModel: ObservableObject {
     static let shared = MixerModel()
 
     @Published private(set) var apps: [AudioApp] = []
-    @Published private(set) var outputDevices: [OutputDevice] = []
+    @Published private(set) var outputDevices: [AudioDevice] = []
     @Published private(set) var defaultDeviceID = AudioObjectID(kAudioObjectUnknown)
     @Published private(set) var deviceVolumes: [String: Float] = [:]
+    @Published private(set) var mutedDevices: Set<String> = []
+    @Published private(set) var balances: [String: Float] = [:]
+    @Published private(set) var inputDevices: [AudioDevice] = []
+    @Published private(set) var defaultInputID = AudioObjectID(kAudioObjectUnknown)
+    @Published private(set) var inputVolumes: [String: Float] = [:]
+    @Published private(set) var alertDeviceID = AudioObjectID(kAudioObjectUnknown)
+    /// Sound effects volume, 0...1, as in System Settings › Sound.
+    @Published private(set) var alertVolume: Float = 1
+    @Published private(set) var systemEffects: Effects
+    /// Software volume for outputs without a volume control of their own (HDMI, DisplayPort), by device UID.
+    @Published private(set) var softVolumes: [String: Float]
+    @Published private(set) var softMuted: Set<String>
     @Published private(set) var errors: [String: String] = [:]
     @Published private(set) var settings: [String: AppSetting]
     @Published private(set) var permission = AudioCapturePermission.status
@@ -43,6 +67,10 @@ final class MixerModel: ObservableObject {
     /// Set when the system prompt said yes, in case the status check can't see it.
     private var grantedThisSession = false
     private static let settingsKey = "appSettings"
+    private static let systemEffectsKey = "systemEffects"
+    private static let softVolumesKey = "softVolumes"
+    private static let softMutedKey = "softMuted"
+    private var alertVolumeWork: DispatchWorkItem?
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey) {
@@ -57,6 +85,10 @@ final class MixerModel: ObservableObject {
         } else {
             settings = [:]
         }
+        let defaults = UserDefaults.standard
+        systemEffects = defaults.data(forKey: Self.systemEffectsKey).flatMap { try? JSONDecoder().decode(Effects.self, from: $0) } ?? Effects()
+        softVolumes = defaults.dictionary(forKey: Self.softVolumesKey) as? [String: Float] ?? [:]
+        softMuted = Set(defaults.stringArray(forKey: Self.softMutedKey) ?? [])
 
         // Listener blocks run on the engine's queue; hop to main to schedule a refresh.
         for selector in [kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyDevices,
@@ -91,8 +123,23 @@ final class MixerModel: ObservableObject {
         refresh()
     }
 
-    var defaultDevice: OutputDevice? { outputDevices.first { $0.objectID == defaultDeviceID } }
+    var defaultDevice: AudioDevice? { outputDevices.first { $0.objectID == defaultDeviceID } }
     var defaultDeviceName: String { defaultDevice?.name ?? "No output device" }
+    var defaultInput: AudioDevice? { inputDevices.first { $0.objectID == defaultInputID } }
+    var alertDevice: AudioDevice? { outputDevices.first { $0.objectID == alertDeviceID } }
+
+    /// True for outputs macOS can't change the volume of; AppMixer gives those a software volume.
+    func hasFixedVolume(_ device: AudioDevice) -> Bool { deviceVolumes[device.uid] == nil }
+
+    /// The volume shown for a device: its own, or AppMixer's software volume for a fixed-volume output.
+    func outputVolume(_ device: AudioDevice) -> Float { deviceVolumes[device.uid] ?? softVolumes[device.uid] ?? 1 }
+    func isOutputMuted(_ device: AudioDevice) -> Bool {
+        hasFixedVolume(device) ? softMuted.contains(device.uid) : mutedDevices.contains(device.uid)
+    }
+
+    private var global: AudioEngine.Global {
+        AudioEngine.Global(effects: volumesPaused ? Effects() : systemEffects, softVolumes: softVolumes, softMuted: softMuted)
+    }
 
     func setting(for appID: String) -> AppSetting { settings[appID] ?? AppSetting() }
 
@@ -101,12 +148,113 @@ final class MixerModel: ObservableObject {
     func setVolume(_ volume: Float, for appID: String) { update(appID) { $0.volume = volume } }
     func toggleMute(_ appID: String) { update(appID) { $0.muted.toggle() } }
     func setDevice(_ uid: String?, for appID: String) { update(appID) { $0.deviceUID = uid } }
+    func setEffects(_ effects: Effects, for appID: String) { update(appID) { $0.effects = effects } }
 
     func reset(_ appID: String) {
         settings[appID] = nil
         save()
         errors[appID] = nil
         engine.queue.async { [engine] in engine.remove(appID) }
+        refresh() // the system route takes the app back
+    }
+
+    func setSystemEffects(_ effects: Effects) {
+        systemEffects = effects
+        if let data = try? JSONEncoder().encode(effects) { UserDefaults.standard.set(data, forKey: Self.systemEffectsKey) }
+        if volumesPaused { return resumeVolumes() }
+        push()
+    }
+
+    func setSoftVolume(_ volume: Float, for device: AudioDevice) {
+        softVolumes[device.uid] = min(max(volume, 0), 1)
+        softMuted.remove(device.uid)
+        saveSoftVolumes()
+        push()
+    }
+
+    func toggleOutputMute(_ device: AudioDevice) {
+        if hasFixedVolume(device) {
+            if softMuted.remove(device.uid) == nil { softMuted.insert(device.uid) }
+            saveSoftVolumes()
+            push()
+        } else {
+            let mute = !mutedDevices.contains(device.uid)
+            if mute { mutedDevices.insert(device.uid) } else { mutedDevices.remove(device.uid) }
+            engine.queue.async {
+                var addr = CA.address(kAudioDevicePropertyMute, scope: kAudioObjectPropertyScopeOutput)
+                var value = UInt32(mute ? 1 : 0)
+                AudioObjectSetPropertyData(device.objectID, &addr, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value)
+            }
+        }
+    }
+
+    /// A volume key press for an output with no volume control. Steps of 1/16, like macOS.
+    func volumeKey(_ key: VolumeKey) {
+        guard let device = defaultDevice else { return }
+        let current = softVolumes[device.uid] ?? 1
+        switch key {
+        case .up: setSoftVolume(current + 1 / 16, for: device)
+        case .down: setSoftVolume(current - 1 / 16, for: device)
+        case .mute: toggleOutputMute(device)
+        }
+        VolumeHUD.show(volume: softVolumes[device.uid] ?? 1, muted: softMuted.contains(device.uid), device: device.name)
+    }
+
+    private func saveSoftVolumes() {
+        UserDefaults.standard.set(softVolumes, forKey: Self.softVolumesKey)
+        UserDefaults.standard.set(Array(softMuted), forKey: Self.softMutedKey)
+    }
+
+    func makeDefaultInput(_ device: AudioDevice) {
+        defaultInputID = device.objectID
+        engine.queue.async { CA.setDefaultDevice(kAudioHardwarePropertyDefaultInputDevice, device.objectID) }
+    }
+
+    func makeAlertDevice(_ device: AudioDevice) {
+        alertDeviceID = device.objectID
+        engine.queue.async { CA.setDefaultDevice(kAudioHardwarePropertyDefaultSystemOutputDevice, device.objectID) }
+    }
+
+    func setInputVolume(_ volume: Float, for device: AudioDevice) {
+        inputVolumes[device.uid] = volume
+        engine.queue.async { CA.setDeviceVolume(device.objectID, volume, scope: kAudioObjectPropertyScopeInput) }
+    }
+
+    func setBalance(_ balance: Float, for device: AudioDevice) {
+        balances[device.uid] = balance
+        engine.queue.async { CA.setBalance(device.objectID, balance) }
+    }
+
+    func setSampleRate(_ rate: Double, for device: AudioDevice) {
+        engine.queue.async { CA.setSampleRate(device.objectID, rate) }
+        // The device's format listener refreshes and rebuilds its routes once the change lands.
+    }
+
+    /// Sound effects volume has no Core Audio property; System Settings' own value is set through AppleScript.
+    /// Debounced: a slider drag runs the script once it settles, not on every step.
+    func setAlertVolume(_ volume: Float) {
+        alertVolume = volume
+        alertVolumeWork?.cancel()
+        let work = DispatchWorkItem {
+            var error: NSDictionary?
+            NSAppleScript(source: "set volume alert volume \(safeInt((volume * 100).rounded()))")?.executeAndReturnError(&error)
+            if let error { log.error("Setting the alert volume failed: \(error, privacy: .public)") }
+            MainActor.assumeIsolated { MixerModel.shared.alertVolumeWork = nil }
+        }
+        alertVolumeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    /// Opens the plug-in's own editor for the Audio Unit on a route (an app's ID, or `AudioEngine.systemID`).
+    func openAudioUnitEditor(for id: String, title: String) {
+        engine.queue.async { [engine] in
+            guard let unit = engine.audioUnit(for: id) else { return }
+            DispatchQueue.main.async {
+                AudioUnitWindow.show(unit, title: title) {
+                    engine.queue.async { engine.saveAudioUnitState(for: id) }
+                }
+            }
+        }
     }
 
     func resetAll() {
@@ -116,12 +264,12 @@ final class MixerModel: ObservableObject {
         engine.queue.async { [engine] in engine.removeAll() }
     }
 
-    func makeDefault(_ device: OutputDevice) {
+    func makeDefault(_ device: AudioDevice) {
         defaultDeviceID = device.objectID
-        engine.queue.async { CA.setDefaultOutputDevice(device.objectID) }
+        engine.queue.async { CA.setDefaultDevice(kAudioHardwarePropertyDefaultOutputDevice, device.objectID) }
     }
 
-    func setDeviceVolume(_ volume: Float, for device: OutputDevice) {
+    func setDeviceVolume(_ volume: Float, for device: AudioDevice) {
         deviceVolumes[device.uid] = volume
         engine.queue.async { CA.setDeviceVolume(device.objectID, volume) }
     }
@@ -158,8 +306,9 @@ final class MixerModel: ObservableObject {
 
         guard let app = apps.first(where: { $0.id == appID }) else { return }
         let canCreate = setting.isPassthrough || ensurePermission()
+        let global = self.global
         engine.queue.async { [engine] in
-            let errors = engine.update(app, setting, canCreateTaps: canCreate)
+            let errors = engine.update(app, setting, global: global, canCreateTaps: canCreate)
             DispatchQueue.main.async { MixerModel.shared.publish(errors: errors) }
         }
     }
@@ -168,6 +317,23 @@ final class MixerModel: ObservableObject {
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: Self.settingsKey)
         }
+    }
+
+    /// Applies system-wide changes (system effects, software volume) without rescanning.
+    private func push() {
+        let settings = volumesPaused ? [:] : self.settings
+        let global = self.global
+        let apps = self.apps
+        let canCreate = needsTaps(settings, global) ? ensurePermission() : false
+        engine.queue.async { [engine] in
+            let errors = engine.reconcile(apps: apps, settings: settings, global: global, canCreateTaps: canCreate)
+            DispatchQueue.main.async { MixerModel.shared.publish(errors: errors) }
+        }
+    }
+
+    private func needsTaps(_ settings: [String: AppSetting], _ global: AudioEngine.Global) -> Bool {
+        settings.values.contains { !$0.isPassthrough } || global.effects.isActive
+            || outputDevices.contains { hasFixedVolume($0) && global.gain(for: $0.uid) != 1 }
     }
 
     // MARK: Refresh
@@ -206,11 +372,12 @@ final class MixerModel: ObservableObject {
         refreshInFlight = true
         refreshStarted = Date()
         let settings = volumesPaused ? [:] : self.settings
-        let canCreate = settings.values.contains { !$0.isPassthrough } ? ensurePermission() : false
+        let global = self.global
+        let canCreate = needsTaps(settings, global) ? ensurePermission() : false
 
         engine.queue.async { [engine] in
             let snapshot = engine.scan()
-            let errors = engine.reconcile(apps: snapshot.apps, settings: settings, canCreateTaps: canCreate)
+            let errors = engine.reconcile(apps: snapshot.apps, settings: settings, global: global, canCreateTaps: canCreate)
             DispatchQueue.main.async {
                 let model = MixerModel.shared
                 model.publish(snapshot)
@@ -230,6 +397,16 @@ final class MixerModel: ObservableObject {
         if snapshot.defaultDeviceID != defaultDeviceID { defaultDeviceID = snapshot.defaultDeviceID }
         if snapshot.deviceVolumes != deviceVolumes { deviceVolumes = snapshot.deviceVolumes }
         if snapshot.apps != apps { apps = snapshot.apps }
+        if snapshot.mutedDevices != mutedDevices { mutedDevices = snapshot.mutedDevices }
+        if snapshot.balances != balances { balances = snapshot.balances }
+        if snapshot.inputDevices != inputDevices { inputDevices = snapshot.inputDevices }
+        if snapshot.defaultInputID != defaultInputID { defaultInputID = snapshot.defaultInputID }
+        if snapshot.inputVolumes != inputVolumes { inputVolumes = snapshot.inputVolumes }
+        if snapshot.alertDeviceID != alertDeviceID { alertDeviceID = snapshot.alertDeviceID }
+        // Read here rather than on the audio queue: it's a preferences read, not an audio-server call.
+        CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
+        let alert = (CFPreferencesCopyAppValue("com.apple.sound.beep.volume" as CFString, kCFPreferencesAnyApplication) as? NSNumber)?.floatValue ?? 1
+        if alertVolumeWork == nil, alert != alertVolume { alertVolume = alert } // not mid-drag
     }
 
     private func publish(errors newErrors: [String: String]) {

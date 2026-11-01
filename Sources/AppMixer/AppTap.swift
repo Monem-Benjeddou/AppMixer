@@ -2,11 +2,19 @@ import CoreAudio
 import Foundation
 
 /// Captures one app's audio with a Core Audio process tap (which silences the app's normal output),
-/// applies gain, and plays it on the chosen output device through a private aggregate device.
+/// applies gain and effects, and plays it on the chosen output device through a private aggregate device.
 /// Private taps and aggregates belong to this process, so if AppMixer quits or crashes the app's audio returns to normal.
 final class AppTap {
-    let processObjectIDs: [AudioObjectID]
-    let outputUID: String
+    enum Source {
+        /// One app's processes.
+        case processes([AudioObjectID])
+        /// Everything except these processes: the system-wide effects route.
+        case allExcept([AudioObjectID])
+    }
+
+    /// Applied in order after the gain. Fixed for the tap's lifetime.
+    let chains: [EffectChain]
+    private let scratch = UnsafeMutablePointer<Float>.allocate(capacity: 2 * EffectChain.maxFrames)
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -25,15 +33,14 @@ final class AppTap {
         set { gainState[0] = newValue.isFinite ? max(0, newValue) : 1 } // never NaN into the audio thread
     }
 
-    init(processObjectIDs: [AudioObjectID], outputDevice: OutputDevice, gain: Float) throws {
-        self.processObjectIDs = processObjectIDs
-        self.outputUID = outputDevice.uid
+    init(source: Source, outputDevice: AudioDevice, gain: Float, chains: [EffectChain]) throws {
+        self.chains = chains
         let gain = gain.isFinite ? max(0, gain) : 1
         gainState[0] = gain
         gainState[1] = gain
         renderCounter.pointee = 0
         do {
-            try start(outputDevice: outputDevice)
+            try start(source: source, outputDevice: outputDevice)
         } catch {
             stop()
             throw error
@@ -44,10 +51,15 @@ final class AppTap {
         stop()
         gainState.deallocate()
         renderCounter.deallocate()
+        scratch.deallocate()
     }
 
-    private func start(outputDevice: OutputDevice) throws {
-        let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+    private func start(source: Source, outputDevice: AudioDevice) throws {
+        let description: CATapDescription
+        switch source {
+        case .processes(let ids): description = CATapDescription(stereoMixdownOfProcesses: ids)
+        case .allExcept(let ids): description = CATapDescription(stereoGlobalTapButExcludeProcesses: ids)
+        }
         description.uuid = UUID()
         description.name = "AppMixer tap"
         description.isPrivate = true
@@ -66,7 +78,7 @@ final class AppTap {
 
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "AppMixer output",
-            kAudioAggregateDeviceUIDKey: "AppMixer-" + UUID().uuidString,
+            kAudioAggregateDeviceUIDKey: "AppMixer-" + UUID().uuidString, // prefix keeps it out of device lists
             kAudioAggregateDeviceMainSubDeviceKey: outputDevice.uid,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
@@ -83,9 +95,12 @@ final class AppTap {
         let tapBufferIndex = CA.streamCount(outputDevice.objectID, scope: kAudioObjectPropertyScopeInput)
         let state = gainState
         let counter = renderCounter
+        let scratch = self.scratch
+        let chains = self.chains
         try check(AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) { _, input, _, output, _ in
             counter.pointee &+= 1
-            AppTap.render(input: input, output: output, tapBufferIndex: tapBufferIndex, gain: state)
+            AppTap.render(input: input, output: output, tapBufferIndex: tapBufferIndex, gain: state,
+                          scratch: scratch, chains: chains)
         }, "Creating IO proc")
         try check(AudioDeviceStart(aggregateID, ioProcID), "Starting audio device")
     }
@@ -106,7 +121,8 @@ final class AppTap {
 
     /// Runs on the real-time IO thread: no allocation, no locks.
     private static func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>,
-                               tapBufferIndex: Int, gain: UnsafeMutablePointer<Float>) {
+                               tapBufferIndex: Int, gain: UnsafeMutablePointer<Float>,
+                               scratch: UnsafeMutablePointer<Float>, chains: [EffectChain]) {
         let outs = UnsafeMutableAudioBufferListPointer(output)
         for buffer in outs { if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) } }
 
@@ -129,14 +145,31 @@ final class AppTap {
         // Ramp across the buffer so slider moves and mute toggles don't click.
         let step = (target - startGain) / Float(frames)
         var g = startGain
-        for frame in 0..<frames {
-            g += step
-            let inBase = frame * inChannels
-            let outBase = frame * outChannels
-            for channel in 0..<min(outChannels, max(inChannels, 2)) {
-                let sample = srcSamples[inBase + min(channel, inChannels - 1)] * g
-                dstSamples[outBase + channel] = min(1, max(-1, sample))
+        // Effects work on stereo in blocks of at most `maxFrames`.
+        var done = 0
+        while done < frames {
+            let count = min(EffectChain.maxFrames, frames - done)
+            for i in 0..<count {
+                g += step
+                let base = (done + i) * inChannels
+                scratch[2 * i] = srcSamples[base] * g
+                scratch[2 * i + 1] = srcSamples[base + min(1, inChannels - 1)] * g
             }
+            for chain in chains { chain.process(scratch, frames: count) }
+            for i in 0..<count {
+                let base = (done + i) * outChannels
+                for channel in 0..<min(outChannels, 2) { dstSamples[base + channel] = softClip(scratch[2 * i + channel]) }
+            }
+            done += count
         }
+    }
+
+    /// Rounds off peaks above 0.9 instead of clipping them hard, so boosted audio distorts gently if at all.
+    @inline(__always) static func softClip(_ x: Float) -> Float {
+        guard x.isFinite else { return 0 }
+        let magnitude = abs(x)
+        guard magnitude > 0.9 else { return x }
+        let limited = 0.9 + 0.1 * tanh((magnitude - 0.9) / 0.1)
+        return x < 0 ? -limited : limited
     }
 }

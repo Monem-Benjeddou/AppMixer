@@ -111,35 +111,89 @@ enum CA {
         return list.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 
-    static var defaultOutputDevice: AudioObjectID? {
-        value(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice,
-              initial: AudioObjectID(kAudioObjectUnknown))
-    }
-
     static func streamCount(_ device: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {
         objectIDs(device, kAudioDevicePropertyStreams, scope: scope).count
     }
 
-    static func setDefaultOutputDevice(_ device: AudioObjectID) {
-        var addr = address(kAudioHardwarePropertyDefaultOutputDevice)
+    /// The system's default device for a role: `kAudioHardwarePropertyDefaultOutputDevice`, `…DefaultInputDevice`
+    /// or `…DefaultSystemOutputDevice` (sound effects).
+    static func defaultDevice(_ role: AudioObjectPropertySelector) -> AudioObjectID? {
+        value(AudioObjectID(kAudioObjectSystemObject), role, initial: AudioObjectID(kAudioObjectUnknown))
+    }
+
+    static func setDefaultDevice(_ role: AudioObjectPropertySelector, _ device: AudioObjectID) {
+        var addr = address(role)
         var id = device
         AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
                                    UInt32(MemoryLayout<AudioObjectID>.size), &id)
     }
 
-    /// The device's main volume as shown in Control Center, or nil if the device has no software volume.
-    static func deviceVolume(_ device: AudioObjectID) -> Float? {
-        var addr = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: kAudioObjectPropertyScopeOutput)
-        var volume: Float32 = 0
-        var size = UInt32(MemoryLayout<Float32>.size)
-        guard AudioObjectHasProperty(device, &addr),
-              AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &volume) == noErr else { return nil }
-        return volume
+    /// A Float32 property (volume, balance), or nil if the device doesn't have it.
+    static func float(_ device: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                      scope: AudioObjectPropertyScope) -> Float? {
+        var addr = address(selector, scope: scope)
+        guard AudioObjectHasProperty(device, &addr) else { return nil }
+        return value(device, selector, scope: scope, initial: Float32(0))
     }
 
-    static func setDeviceVolume(_ device: AudioObjectID, _ volume: Float) {
-        var addr = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: kAudioObjectPropertyScopeOutput)
-        var value = Float32(min(max(volume, 0), 1))
+    static func setFloat(_ device: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                         scope: AudioObjectPropertyScope, _ newValue: Float) {
+        var addr = address(selector, scope: scope)
+        var value = Float32(min(max(newValue.isFinite ? newValue : 0, 0), 1))
         AudioObjectSetPropertyData(device, &addr, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+    }
+
+    /// The device's main volume as shown in Control Center, or nil if the device has no software volume.
+    static func deviceVolume(_ device: AudioObjectID, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeOutput) -> Float? {
+        float(device, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: scope)
+    }
+
+    static func setDeviceVolume(_ device: AudioObjectID, _ volume: Float,
+                                scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeOutput) {
+        setFloat(device, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: scope, volume)
+    }
+
+    static func isMuted(_ device: AudioObjectID) -> Bool {
+        (value(device, kAudioDevicePropertyMute, scope: kAudioObjectPropertyScopeOutput, initial: UInt32(0)) ?? 0) != 0
+    }
+
+    /// Left/right balance from 0 (left) to 1 (right), or nil when the device can't change it.
+    static func balance(_ device: AudioObjectID) -> Float? {
+        var addr = address(kAudioHardwareServiceDeviceProperty_VirtualMainBalance, scope: kAudioObjectPropertyScopeOutput)
+        var settable: DarwinBoolean = false
+        guard AudioObjectHasProperty(device, &addr), AudioObjectIsPropertySettable(device, &addr, &settable) == noErr,
+              settable.boolValue else { return nil }
+        return float(device, kAudioHardwareServiceDeviceProperty_VirtualMainBalance, scope: kAudioObjectPropertyScopeOutput)
+    }
+
+    static func setBalance(_ device: AudioObjectID, _ balance: Float) {
+        setFloat(device, kAudioHardwareServiceDeviceProperty_VirtualMainBalance, scope: kAudioObjectPropertyScopeOutput, balance)
+    }
+
+    /// The rates a device offers (ranges collapsed to their ends), lowest first.
+    static func sampleRates(_ device: AudioObjectID) -> [Double] {
+        var addr = address(kAudioDevicePropertyAvailableNominalSampleRates)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &addr, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ranges = [AudioValueRange](repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.size)
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &ranges) == noErr else { return [] }
+        return Set(ranges.flatMap { [$0.mMinimum, $0.mMaximum] }.filter { $0 > 0 }).sorted()
+    }
+
+    static func setSampleRate(_ device: AudioObjectID, _ rate: Double) {
+        var addr = address(kAudioDevicePropertyNominalSampleRate)
+        var value = Float64(rate)
+        AudioObjectSetPropertyData(device, &addr, 0, nil, UInt32(MemoryLayout<Float64>.size), &value)
+    }
+
+    /// The audio server's object for a process, used to keep AppMixer's own output out of the system-wide tap.
+    static func processObject(pid: pid_t) -> AudioObjectID? {
+        var addr = address(kAudioHardwarePropertyTranslatePIDToProcessObject)
+        var pid = pid
+        var object = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr,
+                                                UInt32(MemoryLayout<pid_t>.size), &pid, &size, &object)
+        return status == noErr && object != kAudioObjectUnknown ? object : nil
     }
 }

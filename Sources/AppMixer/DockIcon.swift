@@ -65,6 +65,7 @@ final class DockIcon {
     }
 
     private static func isAppWindow(_ window: NSWindow) -> Bool {
-        !(window is NSPanel) && window.styleMask.contains(.titled) && window.level == .normal
+        // Floating counts: that's the main window pinned on top.
+        !(window is NSPanel) && window.styleMask.contains(.titled) && (window.level == .normal || window.level == .floating)
     }
 }

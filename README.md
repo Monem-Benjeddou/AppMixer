@@ -18,8 +18,11 @@ Per-app volume control for macOS. Turn individual apps up or down, mute them, or
 - **Per-app volume from 0–200%.** Lower one app or boost a quiet one above its normal level.
 - **Per-app mute.** Silence one app without touching the others.
 - **Per-app output routing.** Send any app to any output device. If that device disconnects, the app falls back to the system output, then switches back when the device returns.
-- **Devices page.** See every output device, change its volume, and make it the default.
-- **Menu bar panel.** Quick controls for whatever is playing, plus a full window with search. Close the window and AppMixer leaves the Dock but keeps working from the menu bar.
+- **Per-app and system-wide effects.** A 10-band equalizer with presets, **Magic Boost** (quiet audio gets louder, loud audio is left alone), and any installed Audio Unit effect, for one app or for everything.
+- **Devices page.** Output, input and sound effects devices: volume, input level, balance, sample rate, and which one is the default.
+- **Volume for HDMI and DisplayPort.** Outputs with no volume control of their own get a software volume, and optionally the keyboard's volume keys control it (needs Accessibility permission).
+- **Menu bar panel.** Output, input and sound effects devices, Magic Boost and the system EQ, and whatever is playing, one click away. Open it from anywhere with a keyboard shortcut (⌃⌥M by default), or show the output volume as the menu bar icon.
+- **Keep on top.** Pin the main window so it floats over other apps.
 - **Remembers settings per app.** Choices are reapplied automatically every time the app plays.
 - **No driver to install.** AppMixer uses Core Audio process taps (macOS 14.2+), not a kernel extension or virtual audio device.
 
